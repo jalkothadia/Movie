@@ -461,7 +461,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 3rem;
+        padding: 0 3rem 0 4.5rem;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
     }
     .nav-left-group {
@@ -797,22 +797,26 @@ st.markdown("""
     }
 
     /* Primary Buttons */
-    .stButton {
-        display: flex;
-        justify-content: center;
+    .stButton, div[data-testid="stButton"] {
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        width: 100% !important;
     }
-    .stButton > button {
+    .stButton > button, div[data-testid="stButton"] > button {
         background: linear-gradient(135deg, #FF9F0A 0%, #D97706 100%);
-        color: #000000;
-        font-weight: 700;
-        border: none;
-        border-radius: 12px;
-        padding: 0.65rem 1.4rem;
-        box-shadow: 0 4px 15px rgba(255, 159, 10, 0.3);
-        transition: all 0.3s ease;
-        width: 100%;
-        max-width: 180px;
-        margin: 0 auto;
+        color: #000000 !important;
+        font-weight: 700 !important;
+        font-size: 1rem !important;
+        border: none !important;
+        border-radius: 12px !important;
+        padding: 0.7rem 1.6rem !important;
+        box-shadow: 0 4px 18px rgba(255, 159, 10, 0.35) !important;
+        transition: all 0.3s ease !important;
+        width: 100% !important;
+        max-width: 320px !important;
+        margin: 0 auto !important;
+        white-space: nowrap !important;
     }
     section[data-testid="stSidebar"] .stButton > button {
         max-width: 100% !important;
@@ -855,10 +859,56 @@ st.markdown("""
         -webkit-backdrop-filter: none !important;
     }
     
-    /* Hide default Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
+    /* Header & Sidebar Toggle Controls (Ensures toggle button is visible on deployed app) */
+    #MainMenu { visibility: hidden !important; }
+    footer { visibility: hidden !important; }
+    div[data-testid="stDecoration"] { display: none !important; }
+
+    header[data-testid="stHeader"], header {
+        visibility: visible !important;
+        background: transparent !important;
+        z-index: 100000 !important;
+        pointer-events: none !important;
+    }
+
+    header[data-testid="stHeader"] *, header * {
+        pointer-events: auto !important;
+    }
+
+    /* Style sidebar toggle button (collapsed control & sidebar collapse button) */
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapseButton"],
+    button[data-testid="baseButton-header"],
+    button[data-testid="stSidebarCollapseButton"],
+    button[aria-label="Expand sidebar"],
+    button[aria-label="Collapse sidebar"] {
+        visibility: visible !important;
+        display: flex !important;
+        z-index: 100001 !important;
+        color: #FF9F0A !important;
+        background: rgba(20, 20, 25, 0.85) !important;
+        border: 1px solid rgba(255, 159, 10, 0.4) !important;
+        border-radius: 10px !important;
+        padding: 4px 8px !important;
+        transition: all 0.3s ease !important;
+    }
+
+    [data-testid="collapsedControl"] svg,
+    [data-testid="stSidebarCollapseButton"] svg,
+    button[aria-label="Expand sidebar"] svg,
+    button[aria-label="Collapse sidebar"] svg {
+        fill: #FF9F0A !important;
+        color: #FF9F0A !important;
+        stroke: #FF9F0A !important;
+    }
+
+    [data-testid="collapsedControl"]:hover,
+    [data-testid="stSidebarCollapseButton"]:hover {
+        background: rgba(255, 159, 10, 0.25) !important;
+        border-color: #FF9F0A !important;
+        transform: scale(1.05);
+        box-shadow: 0 0 12px rgba(255, 159, 10, 0.4) !important;
+    }
 
     /* ===================================================
        RESPONSIVE MOBILE & TABLET STYLING
@@ -1236,24 +1286,11 @@ elif st.session_state.selected_movie is None:
         label_visibility="collapsed"
     )
 
-    n = st.slider("NO. Of Recommendation",min_value=3,max_value=10)
-    st.markdown("""
-        <style>
-            div.stButton > button {
-                white-space: nowrap;
-                width: 100%;
-                max-width: 220px;
-            }
-            @media (max-width: 768px) {
-                div.stButton > button {
-                    max-width: 100% !important;
-                    width: 100% !important;
-                }
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-    rec_movie_btn = st.button("Recommend by Movie")
+    n = st.slider("NO. Of Recommendation", min_value=3, max_value=10)
+    
+    col_rec1, col_rec2, col_rec3 = st.columns([1, 1.5, 1])
+    with col_rec2:
+        rec_movie_btn = st.button("🎬 Recommend by Movie", key="rec_movie_btn_main", use_container_width=True)
 
     st.markdown('<div class="section-title">Explore Movies By Genres</div>', unsafe_allow_html=True)
     category_columns = st.columns(4)

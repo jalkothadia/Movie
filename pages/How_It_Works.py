@@ -251,10 +251,56 @@ st.markdown("""
         }
     }
 
-    /* Hide default Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
+    /* Header & Sidebar Toggle Controls (Ensures toggle button is visible on deployed app) */
+    #MainMenu { visibility: hidden !important; }
+    footer { visibility: hidden !important; }
+    div[data-testid="stDecoration"] { display: none !important; }
+
+    header[data-testid="stHeader"], header {
+        visibility: visible !important;
+        background: transparent !important;
+        z-index: 100000 !important;
+        pointer-events: none !important;
+    }
+
+    header[data-testid="stHeader"] *, header * {
+        pointer-events: auto !important;
+    }
+
+    /* Style sidebar toggle button (collapsed control & sidebar collapse button) */
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapseButton"],
+    button[data-testid="baseButton-header"],
+    button[data-testid="stSidebarCollapseButton"],
+    button[aria-label="Expand sidebar"],
+    button[aria-label="Collapse sidebar"] {
+        visibility: visible !important;
+        display: flex !important;
+        z-index: 100001 !important;
+        color: #FF9F0A !important;
+        background: rgba(20, 20, 25, 0.85) !important;
+        border: 1px solid rgba(255, 159, 10, 0.4) !important;
+        border-radius: 10px !important;
+        padding: 4px 8px !important;
+        transition: all 0.3s ease !important;
+    }
+
+    [data-testid="collapsedControl"] svg,
+    [data-testid="stSidebarCollapseButton"] svg,
+    button[aria-label="Expand sidebar"] svg,
+    button[aria-label="Collapse sidebar"] svg {
+        fill: #FF9F0A !important;
+        color: #FF9F0A !important;
+        stroke: #FF9F0A !important;
+    }
+
+    [data-testid="collapsedControl"]:hover,
+    [data-testid="stSidebarCollapseButton"]:hover {
+        background: rgba(255, 159, 10, 0.25) !important;
+        border-color: #FF9F0A !important;
+        transform: scale(1.05);
+        box-shadow: 0 0 12px rgba(255, 159, 10, 0.4) !important;
+    }
 </style>
 <div class="bg-orb-1"></div>
 <div class="bg-orb-2"></div>
