@@ -251,10 +251,25 @@ st.markdown("""
         }
     }
 
-    /* Hide default Streamlit elements */
+    /* Hide default Streamlit elements without hiding sidebar toggle button */
     #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
     footer {visibility: hidden;}
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+    }
+    [data-testid="stToolbar"] {
+        visibility: hidden !important;
+    }
+    [data-testid="stHeaderCollapsedControl"],
+    [data-testid="stSidebarCollapseButton"] {
+        visibility: visible !important;
+        display: flex !important;
+        z-index: 100001 !important;
+    }
+    [data-testid="stHeaderCollapsedControl"] button,
+    [data-testid="stSidebarCollapseButton"] button {
+        color: #FFFFFF !important;
+    }
 </style>
 <div class="bg-orb-1"></div>
 <div class="bg-orb-2"></div>
