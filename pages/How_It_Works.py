@@ -256,19 +256,27 @@ st.markdown("""
     footer {visibility: hidden;}
     header[data-testid="stHeader"] {
         background: transparent !important;
+        z-index: 100001 !important;
+        pointer-events: none !important;
     }
     [data-testid="stToolbar"] {
         visibility: hidden !important;
+        pointer-events: none !important;
     }
     [data-testid="stHeaderCollapsedControl"],
     [data-testid="stSidebarCollapseButton"] {
         visibility: visible !important;
         display: flex !important;
-        z-index: 100001 !important;
+        pointer-events: auto !important;
+        z-index: 100002 !important;
     }
     [data-testid="stHeaderCollapsedControl"] button,
-    [data-testid="stSidebarCollapseButton"] button {
+    [data-testid="stSidebarCollapseButton"] button,
+    [data-testid="stHeaderCollapsedControl"] svg,
+    [data-testid="stSidebarCollapseButton"] svg {
         color: #FFFFFF !important;
+        fill: #FFFFFF !important;
+        stroke: #FFFFFF !important;
     }
 </style>
 <div class="bg-orb-1"></div>

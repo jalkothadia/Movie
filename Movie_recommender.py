@@ -797,12 +797,19 @@ st.markdown("""
         transform: translateY(-3px);
     }
 
-    /* Primary Buttons */
-    .stButton {
-        display: flex;
-        justify-content: center;
+    /* Primary Buttons Centering & Styling */
+    div[data-testid="stElementContainer"]:has(div.stButton) {
+        display: flex !important;
+        justify-content: center !important;
+        width: 100% !important;
     }
-    .stButton > button {
+    div.stButton {
+        display: flex !important;
+        justify-content: center !important;
+        width: 100% !important;
+    }
+    .stButton > button,
+    div.stButton > button {
         background: linear-gradient(135deg, #FF9F0A 0%, #D97706 100%);
         color: #000000;
         font-weight: 700;
@@ -812,8 +819,18 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(255, 159, 10, 0.3);
         transition: all 0.3s ease;
         width: 100%;
-        max-width: 180px;
-        margin: 0 auto;
+        max-width: 240px;
+        margin: 0 auto !important;
+        display: block !important;
+    }
+    div[data-testid="column"] div.stButton {
+        display: block !important;
+        width: 100% !important;
+    }
+    div[data-testid="column"] div.stButton > button {
+        max-width: 100% !important;
+        width: 100% !important;
+        margin: 0 !important;
     }
     section[data-testid="stSidebar"] .stButton > button {
         max-width: 100% !important;
@@ -875,19 +892,27 @@ st.markdown("""
     footer {visibility: hidden;}
     header[data-testid="stHeader"] {
         background: transparent !important;
+        z-index: 100001 !important;
+        pointer-events: none !important;
     }
     [data-testid="stToolbar"] {
         visibility: hidden !important;
+        pointer-events: none !important;
     }
     [data-testid="stHeaderCollapsedControl"],
     [data-testid="stSidebarCollapseButton"] {
         visibility: visible !important;
         display: flex !important;
-        z-index: 100001 !important;
+        pointer-events: auto !important;
+        z-index: 100002 !important;
     }
     [data-testid="stHeaderCollapsedControl"] button,
-    [data-testid="stSidebarCollapseButton"] button {
+    [data-testid="stSidebarCollapseButton"] button,
+    [data-testid="stHeaderCollapsedControl"] svg,
+    [data-testid="stSidebarCollapseButton"] svg {
         color: #FFFFFF !important;
+        fill: #FFFFFF !important;
+        stroke: #FFFFFF !important;
     }
 
     /* ===================================================
@@ -1269,10 +1294,22 @@ elif st.session_state.selected_movie is None:
     n = st.slider("NO. Of Recommendation",min_value=3,max_value=10)
     st.markdown("""
         <style>
+            div[data-testid="stElementContainer"]:has(div.stButton) {
+                display: flex !important;
+                justify-content: center !important;
+                width: 100% !important;
+            }
+            div.stButton {
+                display: flex !important;
+                justify-content: center !important;
+                width: 100% !important;
+            }
             div.stButton > button {
-                white-space: nowrap;
-                width: 100%;
-                max-width: 220px;
+                white-space: nowrap !important;
+                width: 100% !important;
+                max-width: 240px !important;
+                margin: 0 auto !important;
+                display: block !important;
             }
             @media (max-width: 768px) {
                 div.stButton > button {
