@@ -21,7 +21,7 @@ def get_users_collection():
     mongo_uri = None
     try:
         if "MONGODB_URI" in st.secrets:
-            mongo_uri = st.secrets["mongodb+srv://24010101149_db_user:jal123@cluster0.pwiqrnb.mongodb.net/"]
+            mongo_uri = st.secrets["MONGODB_URI"]
     except Exception:
         pass
 

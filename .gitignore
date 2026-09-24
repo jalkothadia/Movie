@@ -53,7 +53,6 @@ venv.bak/
 # Large datasets and data folders
 data/
 datasets/
-*.csv
 *.parquet
 *.jsonl
 *.h5py
@@ -69,6 +68,8 @@ mlruns/
 # Notebook outputs (optional: keep clean notebooks)
 # *.ipynb
 
+.ipynb_checkpoints/
+
 # =================
 # Streamlit Specific
 # =================
@@ -77,6 +78,7 @@ mlruns/
 # Temporary storage or local databases used by apps
 streamlit-storage/
 work-tmp/
+.streamlit/secrets.toml
 
 # =================
 # IDEs and Editors
