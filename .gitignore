@@ -1,0 +1,103 @@
+# =================
+# Python Basics
+# =================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+posters
+
+# =================
+# Virtual Environments
+# =================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# =================
+# Machine Learning & Data Science
+# =================
+# Model weights and serialized files
+*.h5
+*.hdf5
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.weights
+*.bin
+
+# Large datasets and data folders
+data/
+datasets/
+*.csv
+*.parquet
+*.jsonl
+*.h5py
+*.tfrecord
+
+# Checkpoints and logs
+logs/
+runs/
+wandb/
+mlruns/
+.tensorboard/
+
+# Notebook outputs (optional: keep clean notebooks)
+# *.ipynb
+
+# =================
+# Streamlit Specific
+# =================
+# Ignore sensitive credentials and secrets
+
+# Temporary storage or local databases used by apps
+streamlit-storage/
+work-tmp/
+
+# =================
+# IDEs and Editors
+# =================
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# =================
+# Operating System Files
+# =================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
