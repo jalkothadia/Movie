@@ -436,7 +436,6 @@ st.markdown("""
         -webkit-backdrop-filter: blur(30px);
         border-right: 1px solid rgba(255, 255, 255, 0.08);
         box-shadow: 10px 0 30px rgba(0, 0, 0, 0.8);
-        z-index: 100000 !important;
     }
 
     /* Streamlit Content Depth Positioning */
@@ -462,7 +461,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 3rem 0 4.2rem;
+        padding: 0 3rem;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
     }
     .nav-left-group {
@@ -797,19 +796,12 @@ st.markdown("""
         transform: translateY(-3px);
     }
 
-    /* Primary Buttons Centering & Styling */
-    div[data-testid="stElementContainer"]:has(div.stButton) {
-        display: flex !important;
-        justify-content: center !important;
-        width: 100% !important;
+    /* Primary Buttons */
+    .stButton {
+        display: flex;
+        justify-content: center;
     }
-    div.stButton {
-        display: flex !important;
-        justify-content: center !important;
-        width: 100% !important;
-    }
-    .stButton > button,
-    div.stButton > button {
+    .stButton > button {
         background: linear-gradient(135deg, #FF9F0A 0%, #D97706 100%);
         color: #000000;
         font-weight: 700;
@@ -819,18 +811,8 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(255, 159, 10, 0.3);
         transition: all 0.3s ease;
         width: 100%;
-        max-width: 240px;
-        margin: 0 auto !important;
-        display: block !important;
-    }
-    div[data-testid="column"] div.stButton {
-        display: block !important;
-        width: 100% !important;
-    }
-    div[data-testid="column"] div.stButton > button {
-        max-width: 100% !important;
-        width: 100% !important;
-        margin: 0 !important;
+        max-width: 180px;
+        margin: 0 auto;
     }
     section[data-testid="stSidebar"] .stButton > button {
         max-width: 100% !important;
@@ -853,31 +835,17 @@ st.markdown("""
         opacity: 1 !important;
     }
     div[data-baseweb="select"] > div {
-        background-color: #141416 !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: 12px !important;
-        color: #FFFFFF !important;
+        background-color: #141416;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        color: white;
         opacity: 1 !important;
     }
     div[data-baseweb="popover"],
-    div[data-baseweb="menu"],
-    ul[role="listbox"] {
-        background-color: #141416 !important;
-        color: #FFFFFF !important;
+    div[data-baseweb="menu"] {
         opacity: 1 !important;
         backdrop-filter: none !important;
         -webkit-backdrop-filter: none !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-        border-radius: 12px !important;
-    }
-    li[role="option"] {
-        background-color: #141416 !important;
-        color: #FFFFFF !important;
-    }
-    li[role="option"]:hover,
-    li[role="option"][aria-selected="true"] {
-        background-color: #27272A !important;
-        color: #FF9F0A !important;
     }
     div[data-baseweb="backdrop"] {
         background: transparent !important;
@@ -887,40 +855,17 @@ st.markdown("""
         -webkit-backdrop-filter: none !important;
     }
     
-    /* Hide default Streamlit elements without hiding sidebar toggle button */
+    /* Hide default Streamlit elements */
     #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
     footer {visibility: hidden;}
-    header[data-testid="stHeader"] {
-        background: transparent !important;
-        z-index: 100001 !important;
-        pointer-events: none !important;
-    }
-    [data-testid="stToolbar"] {
-        visibility: hidden !important;
-        pointer-events: none !important;
-    }
-    [data-testid="stHeaderCollapsedControl"],
-    [data-testid="stSidebarCollapseButton"] {
-        visibility: visible !important;
-        display: flex !important;
-        pointer-events: auto !important;
-        z-index: 100002 !important;
-    }
-    [data-testid="stHeaderCollapsedControl"] button,
-    [data-testid="stSidebarCollapseButton"] button,
-    [data-testid="stHeaderCollapsedControl"] svg,
-    [data-testid="stSidebarCollapseButton"] svg {
-        color: #FFFFFF !important;
-        fill: #FFFFFF !important;
-        stroke: #FFFFFF !important;
-    }
 
     /* ===================================================
        RESPONSIVE MOBILE & TABLET STYLING
     =================================================== */
     @media (max-width: 768px) {
         .custom-navbar {
-            padding: 0 1rem 0 3.8rem !important;
+            padding: 0 1rem !important;
             height: 60px !important;
         }
         .nav-brand {
@@ -1266,7 +1211,7 @@ if st.session_state.current_page == "My List":
                 with col:
                     st.markdown(f"""
                     <div class="poster-card">
-                        <img src="{img_url}" onerror="this.onerror=null;this.src='{PLACEHOLDER_IMAGE}';" style="width: 100%; border-radius: 12px; aspect-ratio: 2/3; object-fit: cover; margin-bottom: 0.5rem;" alt="{m_title}">
+                        <img src="{img_url}" style="width: 100%; border-radius: 12px; aspect-ratio: 2/3; object-fit: cover; margin-bottom: 0.5rem;" alt="{m_title}">
                         <div class="movie-title">{m_title}</div>
                         <div class="movie-meta">
                             <span class="movie-genre">{genre_str}</span>
@@ -1294,22 +1239,10 @@ elif st.session_state.selected_movie is None:
     n = st.slider("NO. Of Recommendation",min_value=3,max_value=10)
     st.markdown("""
         <style>
-            div[data-testid="stElementContainer"]:has(div.stButton) {
-                display: flex !important;
-                justify-content: center !important;
-                width: 100% !important;
-            }
-            div.stButton {
-                display: flex !important;
-                justify-content: center !important;
-                width: 100% !important;
-            }
             div.stButton > button {
-                white-space: nowrap !important;
-                width: 100% !important;
-                max-width: 240px !important;
-                margin: 0 auto !important;
-                display: block !important;
+                white-space: nowrap;
+                width: 100%;
+                max-width: 220px;
             }
             @media (max-width: 768px) {
                 div.stButton > button {
@@ -1352,7 +1285,7 @@ elif st.session_state.selected_movie is None:
                     <div class="top10-container">
                         <div class="rank-number">{movie['rank']}</div>
                         <div class="rank-poster-box">
-                            <img src="{movie['img']}" onerror="this.onerror=null;this.src='{PLACEHOLDER_IMAGE}';" alt="{movie['title']}">
+                            <img src="{movie['img']}" alt="{movie['title']}">
                         </div>
                     </div>
                     <div class="rec-card-details">
@@ -1379,7 +1312,7 @@ elif st.session_state.selected_movie is None:
                     <div class="top10-container">
                         <div class="rank-number">{movie['rank']}</div>
                         <div class="rank-poster-box">
-                            <img src="{movie['img']}" onerror="this.onerror=null;this.src='{PLACEHOLDER_IMAGE}';" alt="{movie['title']}">
+                            <img src="{movie['img']}" alt="{movie['title']}">
                         </div>
                     </div>
                     <div class="rec-card-details">
@@ -1408,7 +1341,7 @@ elif st.session_state.selected_movie is None:
                 with col:
                     st.markdown(f"""
                     <div class="poster-card">
-                        <img src="{movie['img']}" onerror="this.onerror=null;this.src='{PLACEHOLDER_IMAGE}';" style="width: 100%; border-radius: 12px; aspect-ratio: 2/3; object-fit: cover; margin-bottom: 0.5rem;" alt="{movie['title']}">
+                        <img src="{movie['img']}" style="width: 100%; border-radius: 12px; aspect-ratio: 2/3; object-fit: cover; margin-bottom: 0.5rem;" alt="{movie['title']}">
                         <div class="movie-title">{movie['title']}</div>
                         <div class="movie-meta">
                             <span class="movie-genre">{movie['genre']}</span>
@@ -1458,7 +1391,7 @@ else:
                 <div class="top10-container">
                     <div class="rank-number">{movie['rank']}</div>
                     <div class="rank-poster-box">
-                        <img src="{movie['img']}" onerror="this.onerror=null;this.src='{PLACEHOLDER_IMAGE}';" alt="{movie['title']}">
+                        <img src="{movie['img']}" alt="{movie['title']}">
                         <div class="recently-added-badge">Recently added</div>
                     </div>
                 </div>
