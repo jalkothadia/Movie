@@ -206,14 +206,15 @@ def show_auth_dialog():
                 st.error(msg)
 
 def trigger_add_to_list(movie):
-    """Helper to handle 'Add to My List' action. Requires login first."""
+    """Helper to handle 'Add to My List' action with loading spinner."""
+    title = movie.get("title", "Movie")
     if not st.session_state.get("logged_in"):
         st.session_state.pending_movie = movie
         st.toast("🔒 Please log in or create an account first to save movies to your list.", icon="🔐")
         show_auth_dialog()
     else:
+        show_loading_circle(f"🍿 Adding '{title}' to your watchlist...")
         m_id = movie.get("movie_id")
-        title = movie.get("title")
         if m_id is None and 'df' in globals() and df is not None:
             match = df[df["title"] == title]
             if not match.empty:
@@ -221,6 +222,13 @@ def trigger_add_to_list(movie):
         add_movie_to_user_list(st.session_state.user_email, m_id, title)
         st.toast(f"Added '{title}' to My List!", icon="✅")
         st.rerun()
+
+def trigger_remove_from_list(movie_id, title="Movie"):
+    """Helper to handle 'Remove from My List' action with loading spinner."""
+    show_loading_circle(f"🗑️ Removing '{title}' from your watchlist...")
+    remove_movie_from_user_list(st.session_state.get("user_email", ""), movie_id, title)
+    st.toast(f"Removed '{title}' from your watchlist.")
+    st.rerun()
 
 def is_movie_in_user_list(movie):
     """Check if movie is already in logged-in user's list."""
@@ -355,6 +363,18 @@ def load_data():
     return df, unique_actors
 
 df, unique_actors = load_data()
+
+def show_loading_circle(text="Analyzing similarity matrix & fetching recommendations..."):
+    """Render animated amber circular spinner before displaying results."""
+    placeholder = st.empty()
+    placeholder.markdown(f"""
+    <div class="loading-circle-box">
+        <div class="loading-circle"></div>
+        <div class="loading-text">{text}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    time.sleep(0.4)
+    placeholder.empty()
 
 def get_movie_full_info(identifier):
     """Retrieve comprehensive movie metadata for details modal."""
@@ -546,9 +566,7 @@ def show_movie_details_dialog(identifier):
             is_in_list = is_movie_in_user_list(info)
             if is_in_list:
                 if st.button("➖ Remove from List", key=f"dlg_rem_{info['movie_id']}", use_container_width=True):
-                    remove_movie_from_user_list(st.session_state.user_email, info["movie_id"], info["title"])
-                    st.toast(f"Removed '{info['title']}' from your list.")
-                    st.rerun()
+                    trigger_remove_from_list(info["movie_id"], info["title"])
             else:
                 if st.button("➕ Add to My List", key=f"dlg_add_{info['movie_id']}", use_container_width=True):
                     trigger_add_to_list(info)
@@ -927,6 +945,50 @@ st.markdown("""
         border: 1px solid rgba(255, 159, 10, 0.4) !important;
         border-radius: 10px !important;
     }
+
+    /* Custom Circular Loading Circle Animation */
+    @keyframes spinRing {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .loading-circle-box {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 1rem;
+        gap: 16px;
+        width: 100%;
+        margin: 1.5rem 0;
+    }
+
+    .loading-circle {
+        width: 52px;
+        height: 52px;
+        border: 4px solid rgba(255, 159, 10, 0.15);
+        border-top: 4px solid #FF9F0A;
+        border-right: 4px solid #FF9F0A;
+        border-radius: 50%;
+        animation: spinRing 0.75s linear infinite;
+        box-shadow: 0 0 22px rgba(255, 159, 10, 0.45);
+    }
+
+    .loading-text {
+        color: #FF9F0A;
+        font-weight: 700;
+        font-size: 1rem;
+        letter-spacing: 0.02em;
+    }
+
+    /* Override Streamlit Spinner with Amber Theme */
+    div[data-testid="stSpinner"] > div {
+        border-top-color: #FF9F0A !important;
+    }
+    div[data-testid="stSpinner"] p {
+        color: #FF9F0A !important;
+        font-weight: 600 !important;
+    }
 </style>
 <div class="bg-orb-1"></div>
 <div class="bg-orb-2"></div>
@@ -1032,6 +1094,7 @@ FILTER_OPTIONS = [
 with st.sidebar:
     st.markdown("## 🧭 Navigation")
     if st.button("🏠 Home", use_container_width=True):
+        show_loading_circle("🏠 Navigating to Home...")
         st.session_state.current_page = "Home"
         st.session_state.selected_movie = None
         st.session_state.active_recommendation = None
@@ -1039,10 +1102,12 @@ with st.sidebar:
 
     user_movies_count = len(get_user_movies_from_db(st.session_state.user_email))
     if st.button(f"👤 My Profile & List ({user_movies_count})", use_container_width=True):
+        show_loading_circle("👤 Navigating to Profile...")
         st.session_state.current_page = "Profile"
         st.rerun()
 
     if st.button(f"📌 Watchlist ({user_movies_count})", use_container_width=True):
+        show_loading_circle("📌 Navigating to Watchlist...")
         st.session_state.current_page = "Watchlist"
         st.rerun()
 
@@ -1051,6 +1116,7 @@ with st.sidebar:
     if st.session_state.get("logged_in"):
         st.markdown(f"**Logged in as:**\n`{st.session_state.user_email}`")
         if st.button("🚪 Log Out", use_container_width=True):
+            show_loading_circle("🚪 Logging out...")
             st.session_state.logged_in = False
             st.session_state.user_email = ""
             st.session_state.pending_movie = None
@@ -1064,6 +1130,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("## ⚙️ Filter Options")
     if st.button("🔄 Reset Filters", use_container_width=True):
+        show_loading_circle("🔄 Resetting filters...")
         st.session_state.selected_filter = "All"
         st.session_state.selected_movie = None
         st.session_state.active_recommendation = None
@@ -1135,17 +1202,12 @@ def get_recommendations(target_title, n=5):
     return recommendations
 
 # Top Navbar Rendering
-user_pill_html = ""
-if st.session_state.get("logged_in") and st.session_state.get("user_email"):
-    user_pill_html = f'<div class="nav-user-pill">👤 {st.session_state.user_email}</div>'
-
-st.markdown(f"""
+st.markdown("""
 <div class="custom-navbar">
     <div class="nav-brand">
         <div class="brand-sq"><div class="brand-sq-inner"></div></div>
         MoviX
     </div>
-    {user_pill_html}
 </div>
 """, unsafe_allow_html=True)
 
@@ -1256,9 +1318,7 @@ if st.session_state.current_page == "Profile":
                             show_movie_details_dialog(movie)
                     with c2:
                         if st.button("➖ Remove", key=f"prof_rem_{idx}_{movie['movie_id']}", use_container_width=True):
-                            remove_movie_from_user_list(user_email, movie['movie_id'], movie['title'])
-                            st.toast(f"Removed '{movie['title']}' from watchlist.")
-                            st.rerun()
+                            trigger_remove_from_list(movie['movie_id'], movie['title'])
 
     with tab_analytics:
         st.markdown("### 📊 Watchlist Insights")
@@ -1330,12 +1390,30 @@ elif st.session_state.current_page == "Watchlist":
                         show_movie_details_dialog(info)
                 with c2:
                     if st.button("➖ Remove", key=f"wl_rem_{idx}_{info['movie_id']}", use_container_width=True):
-                        remove_movie_from_user_list(st.session_state.get("user_email", ""), info['movie_id'], info['title'])
-                        st.toast(f"Removed '{info['title']}' from your list.")
-                        st.rerun()
+                        trigger_remove_from_list(info['movie_id'], info['title'])
 
 # PAGE 3: HOME & RECOMMENDATIONS
 elif st.session_state.selected_movie is None:
+    if st.session_state.get("logged_in") and st.session_state.get("user_email"):
+        st.markdown(f"""
+        <div style="
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 159, 10, 0.12);
+            border: 1px solid rgba(255, 159, 10, 0.35);
+            border-radius: 20px;
+            padding: 6px 16px;
+            color: #FF9F0A;
+            font-weight: 600;
+            font-size: 0.92rem;
+            margin-bottom: 0.8rem;
+            box-shadow: 0 4px 15px rgba(255, 159, 10, 0.15);
+        ">
+            👤 Logged in as: <span style="color: #FFFFFF; font-weight: 700;">{st.session_state.user_email}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown('<div class="section-title">🔍 Discover Your Next Watch</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-subtitle">Search for a title or pick from the list below to get instant personalized recommendations.</div>', unsafe_allow_html=True)
 
@@ -1372,6 +1450,7 @@ elif st.session_state.selected_movie is None:
 
     if active_rec and active_rec[0] == "movie":
         target_movie = active_rec[1]
+        show_loading_circle(f"🎬 Finding top recommendations for '{target_movie}'...")
         recommendations = get_recommendations(target_movie, n)
         if recommendations:
             st.markdown(f"### 🎯 Recommendations for: **{target_movie}**")
@@ -1405,6 +1484,7 @@ elif st.session_state.selected_movie is None:
 
     elif active_rec and active_rec[0] == "genre":
         target_genre = active_rec[1]
+        show_loading_circle(f"🏷️ Fetching top '{target_genre}' movies...")
         genre_recommendations = recommend_genres(target_genre, n)
         if genre_recommendations:
             st.markdown(f"### 🏷️ Top Recommendations in **{target_genre}** Genre")
@@ -1441,6 +1521,7 @@ elif st.session_state.selected_movie is None:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<div class="section-title">🍿 Popular Movies & Shows</div>', unsafe_allow_html=True)
 
+        show_loading_circle("🍿 Loading popular movies...")
         visible_movies = get_filtered_movies(n)
 
         if visible_movies:
@@ -1486,6 +1567,7 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
+    show_loading_circle(f"✨ Generating similarity recommendations for '{target}'...")
     recommendations = get_recommendations(target)
 
     if recommendations:
