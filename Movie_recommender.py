@@ -6,8 +6,8 @@ import requests
 import time
 import ast
 import random
+import urllib.parse
 from dotenv import load_dotenv
-from supabase import create_client
 from pymongo import MongoClient
 
 load_dotenv()
@@ -32,20 +32,19 @@ def get_users_collection():
         return None
 
     try:
-        client = MongoClient(mongo_uri)
-        # Try getting default DB or specified DB name
+        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
         db = client.get_default_database("movie_recommender_db")
         return db["users"]
     except Exception:
         try:
-            client = MongoClient(mongo_uri)
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=3000)
             db = client["movie_recommender_db"]
             return db["users"]
         except Exception:
             return None
 
 def register_user(email, password, confirm_password):
-    """Register a new user with plain text password in MongoDB Atlas."""
+    """Register a new user in MongoDB Atlas."""
     if not email or not password:
         return False, "Email and password are required."
     if password != confirm_password:
@@ -53,112 +52,129 @@ def register_user(email, password, confirm_password):
 
     users_collection = get_users_collection()
     if users_collection is None:
-        return False, "MongoDB connection string not configured. Please set MONGODB_URI in secrets.toml or .env."
+        return False, "MongoDB connection error. Check your MONGODB_URI in secrets.toml or .env."
 
-    existing_user = users_collection.find_one({"email": email})
-    if existing_user:
-        return False, "An account with this email already exists."
+    try:
+        existing_user = users_collection.find_one({"email": email})
+        if existing_user:
+            return False, "An account with this email already exists."
 
-    # Document schema for plain text password college demo requirement:
-    # {
-    #   "_id": ObjectId(...),
-    #   "email": "user@example.com",
-    #   "password": "user-entered-password",
-    #   "movies": []
-    # }
-    user_doc = {
-        "email": email,
-        "password": password,
-        "movies": []
-    }
-    users_collection.insert_one(user_doc)
-    return True, "Account created successfully! Please log in."
+        user_doc = {
+            "email": email,
+            "password": password,
+            "movies": []
+        }
+        users_collection.insert_one(user_doc)
+        return True, "Account created successfully! Please log in."
+    except Exception as e:
+        return False, f"Database error: {str(e)}"
 
 def login_user(email, password):
-    """Authenticate user strictly using email and plain text password query."""
+    """Authenticate user strictly using email and password."""
     if not email or not password:
         return False, "Email and password are required."
 
     users_collection = get_users_collection()
     if users_collection is None:
-        return False, "MongoDB connection string not configured. Please set MONGODB_URI in secrets.toml or .env."
+        return False, "MongoDB connection error. Check MONGODB_URI."
 
-    # Find user using both email and password as specified:
-    user = users_collection.find_one({
-        "email": email,
-        "password": password
-    })
+    try:
+        user = users_collection.find_one({
+            "email": email,
+            "password": password
+        })
 
-    if user:
-        st.session_state.logged_in = True
-        st.session_state.user_email = email
-        return True, "Logged in successfully!"
-    else:
-        return False, "Invalid email or password."
+        if user:
+            st.session_state.logged_in = True
+            st.session_state.user_email = email
+            return True, "Logged in successfully!"
+        else:
+            return False, "Invalid email or password."
+    except Exception as e:
+        return False, f"Login error: {str(e)}"
 
 def add_movie_to_user_list(email, movie_id, title):
-    """Add movie to logged-in user's movies array using $addToSet to prevent duplicates."""
-    users_collection = get_users_collection()
-    if users_collection is None:
-        return False, "MongoDB connection error."
+    """Add movie to logged-in user's movies array with session fallback."""
+    if "guest_watchlist" not in st.session_state:
+        st.session_state.guest_watchlist = []
 
     try:
         m_id = int(movie_id) if movie_id is not None else 0
     except (ValueError, TypeError):
         m_id = movie_id
 
-    # Movie item structure: { "movie_id": 123, "title": "Movie Name" }
     movie_obj = {
         "movie_id": m_id,
         "title": title
     }
 
-    users_collection.update_one(
-        {"email": email},
-        {"$addToSet": {"movies": movie_obj}}
-    )
-    return True, "Movie added to your list!"
+    # Always sync to local session state
+    if not any(item.get("title") == title or (m_id is not None and m_id != 0 and item.get("movie_id") == m_id) for item in st.session_state.guest_watchlist):
+        st.session_state.guest_watchlist.append(movie_obj)
+
+    if email:
+        users_collection = get_users_collection()
+        if users_collection is not None:
+            try:
+                users_collection.update_one(
+                    {"email": email},
+                    {"$addToSet": {"movies": movie_obj}}
+                )
+            except Exception:
+                pass
+    return True, "Movie added to your watchlist!"
 
 def remove_movie_from_user_list(email, movie_id, title=None):
-    """Remove movie from logged-in user's movies array using $pull."""
-    users_collection = get_users_collection()
-    if users_collection is None:
-        return False, "MongoDB connection error."
-
+    """Remove movie from logged-in user's movies array with session fallback."""
     try:
         m_id = int(movie_id) if movie_id is not None else movie_id
     except (ValueError, TypeError):
         m_id = movie_id
 
-    if m_id is not None and m_id != 0:
-        users_collection.update_one(
-            {"email": email},
-            {"$pull": {"movies": {"movie_id": m_id}}}
-        )
-    if title:
-        users_collection.update_one(
-            {"email": email},
-            {"$pull": {"movies": {"title": title}}}
-        )
-    return True, "Movie removed from your list!"
+    if "guest_watchlist" in st.session_state:
+        st.session_state.guest_watchlist = [
+            item for item in st.session_state.guest_watchlist
+            if not (item.get("title") == title or (m_id is not None and m_id != 0 and item.get("movie_id") == m_id))
+        ]
+
+    if email:
+        users_collection = get_users_collection()
+        if users_collection is not None:
+            try:
+                if m_id is not None and m_id != 0:
+                    users_collection.update_one(
+                        {"email": email},
+                        {"$pull": {"movies": {"movie_id": m_id}}}
+                    )
+                if title:
+                    users_collection.update_one(
+                        {"email": email},
+                        {"$pull": {"movies": {"title": title}}}
+                    )
+            except Exception:
+                pass
+    return True, "Movie removed from your watchlist!"
 
 def get_user_movies_from_db(email):
-    """Fetch movies array for the logged-in user from MongoDB Atlas."""
-    if not email:
+    """Fetch movies array for logged-in user."""
+    if not email or not st.session_state.get("logged_in"):
         return []
 
     users_collection = get_users_collection()
     if users_collection is None:
-        return []
+        return st.session_state.get("guest_watchlist", [])
 
-    user = users_collection.find_one({"email": email})
-    if user and "movies" in user and isinstance(user["movies"], list):
-        return user["movies"]
-    return []
+    try:
+        user = users_collection.find_one({"email": email})
+        if user and "movies" in user and isinstance(user["movies"], list):
+            return user["movies"]
+    except Exception:
+        pass
+    return st.session_state.get("guest_watchlist", [])
 
 @st.dialog("🔐 Account Login / Register")
 def show_auth_dialog():
-    st.write("Log in or create a demo account to manage your personal watchlist.")
+    st.write("Log in or create an account to manage your personal watchlist.")
     tab_login, tab_register = st.tabs(["🔑 Log In", "📝 Register"])
 
     with tab_login:
@@ -173,7 +189,7 @@ def show_auth_dialog():
                     add_movie_to_user_list(email, pm.get("movie_id"), pm.get("title"))
                     st.session_state.pending_movie = None
                     st.toast(f"Added '{pm.get('title')}' to My List!", icon="✅")
-                time.sleep(0.5)
+                time.sleep(0.4)
                 st.rerun()
             else:
                 st.error(msg)
@@ -190,9 +206,10 @@ def show_auth_dialog():
                 st.error(msg)
 
 def trigger_add_to_list(movie):
-    """Helper to handle 'Add to My List' action with login popup if unauthenticated."""
+    """Helper to handle 'Add to My List' action. Requires login first."""
     if not st.session_state.get("logged_in"):
         st.session_state.pending_movie = movie
+        st.toast("🔒 Please log in or create an account first to save movies to your list.", icon="🔐")
         show_auth_dialog()
     else:
         m_id = movie.get("movie_id")
@@ -209,39 +226,36 @@ def is_movie_in_user_list(movie):
     """Check if movie is already in logged-in user's list."""
     if not st.session_state.get("logged_in"):
         return False
-    user_movies = get_user_movies_from_db(st.session_state.user_email)
+    user_movies = get_user_movies_from_db(st.session_state.get("user_email", ""))
     m_id = movie.get("movie_id")
     title = movie.get("title")
     for item in user_movies:
         if item.get("title") == title:
             return True
-        if m_id is not None and item.get("movie_id") == m_id:
+        if m_id is not None and m_id != 0 and item.get("movie_id") == m_id:
             return True
     return False
 
+# Load Dataset & Pickle Models
 movie_dict = pickle.load(open('movie_dict.pkl','rb'))
 movies = pd.DataFrame(movie_dict)
 similarity = pickle.load(open('similarity.pkl','rb'))
 
 session = requests.session()
 PLACEHOLDER_IMAGE = "https://placehold.co/300x450/111827/F8FAFC?text=Poster+Unavailable"
-
-SUPABASE_POSTER_URL = (
-    "https://lfkyggfvcmcdqmgjvlfj.supabase.co"
-    "/storage/v1/object/public/movie-posters"
-)
+SUPABASE_POSTER_URL = "https://lfkyggfvcmcdqmgjvlfj.supabase.co/storage/v1/object/public/movie-posters"
 
 @st.cache_data
 def fetch_poster(movie_id):
     try:
-        poster_url = (f"{SUPABASE_POSTER_URL}/{movie_id}.jpg")
+        poster_url = f"{SUPABASE_POSTER_URL}/{movie_id}.jpg"
         return poster_url
     except Exception:
         pass
     return PLACEHOLDER_IMAGE
 
 def recommend(movie, n):
-    rnd = random.randint(1,10)
+    rnd = random.randint(1, 10)
     matches = movies[movies['title'] == movie].index
     if len(matches) == 0:
         return []
@@ -302,14 +316,12 @@ def recommend_genres(genre, n):
         })
     return recommendations
 
-
 st.set_page_config(
-    page_title="MoviX | Discover & Recommend Movies",
+    page_title="MoviX | Premium Movie Recommender & Watchlist",
     page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
 
 @st.cache_data
 def load_data():
@@ -318,7 +330,7 @@ def load_data():
 
     df = movies_file.merge(credits[["movie_id", "cast"]], left_on="id", right_on="movie_id")
 
-    def get_actors(cast_str, limit=1):
+    def get_actors(cast_str, limit=3):
         try:
             cast_list = ast.literal_eval(cast_str)
             return [actor["name"].strip() for actor in cast_list[:limit] if actor.get("name")]
@@ -344,22 +356,220 @@ def load_data():
 
 df, unique_actors = load_data()
 
+def get_movie_full_info(identifier):
+    """Retrieve comprehensive movie metadata for details modal."""
+    m_id = None
+    title = None
+    
+    if isinstance(identifier, dict):
+        m_id = identifier.get("movie_id") or identifier.get("id")
+        title = identifier.get("title")
+    elif isinstance(identifier, (int, float)):
+        m_id = int(identifier)
+    elif isinstance(identifier, str):
+        title = identifier
 
+    row = None
+    if m_id is not None and 'df' in globals() and df is not None:
+        try:
+            m_id_num = int(m_id)
+            match = df[df['id'] == m_id_num]
+            if not match.empty:
+                row = match.iloc[0]
+        except Exception:
+            pass
 
-# 1. Page Configuration
+    if row is None and title is not None and 'df' in globals() and df is not None:
+        match = df[df['title'].str.lower() == str(title).lower()]
+        if not match.empty:
+            row = match.iloc[0]
 
-# 2. Custom CSS & HTML: Premium Cinematic UI
+    if row is not None:
+        movie_id = int(row['id'])
+        title_str = str(row['title'])
+        tagline = str(row['tagline']) if pd.notnull(row.get('tagline')) and str(row.get('tagline')).strip() != "nan" else ""
+        overview = str(row['overview']) if pd.notnull(row.get('overview')) and str(row.get('overview')).strip() != "nan" else "No overview plot summary available for this movie."
+        release_date = str(row['release_date']) if pd.notnull(row.get('release_date')) else "N/A"
+        year = release_date.split("-")[0] if "-" in release_date else release_date
+        
+        runtime = row.get('runtime', 0)
+        if pd.notnull(runtime) and float(runtime) > 0:
+            hrs = int(float(runtime) // 60)
+            mins = int(float(runtime) % 60)
+            runtime_str = f"{hrs}h {mins}m" if hrs > 0 else f"{mins}m"
+        else:
+            runtime_str = "N/A"
+
+        vote_avg = row.get('vote_average', 0)
+        rating_str = f"★ {float(vote_avg):.1f}" if pd.notnull(vote_avg) else "★ N/A"
+        vote_count = int(row.get('vote_count', 0)) if pd.notnull(row.get('vote_count')) else 0
+        popularity = float(row.get('popularity', 0)) if pd.notnull(row.get('popularity')) else 0.0
+
+        genres_list = row.get('genres_list', [])
+        if not isinstance(genres_list, list) or not genres_list:
+            genres_list = ["Movie"]
+        
+        actors = row.get('actors', [])
+        if not isinstance(actors, list):
+            actors = []
+
+        homepage = str(row.get('homepage')) if pd.notnull(row.get('homepage')) and str(row.get('homepage')).startswith("http") else None
+        budget = int(row.get('budget', 0)) if pd.notnull(row.get('budget')) else 0
+        revenue = int(row.get('revenue', 0)) if pd.notnull(row.get('revenue')) else 0
+
+        poster_url = fetch_poster(movie_id)
+        trailer_query = urllib.parse.quote(f"{title_str} {year} official trailer")
+        trailer_url = f"https://www.youtube.com/results?search_query={trailer_query}"
+
+        return {
+            "movie_id": movie_id,
+            "title": title_str,
+            "tagline": tagline,
+            "overview": overview,
+            "release_date": release_date,
+            "year": year,
+            "runtime_str": runtime_str,
+            "rating_str": rating_str,
+            "vote_average": vote_avg,
+            "vote_count": vote_count,
+            "popularity": popularity,
+            "genres_list": genres_list,
+            "actors": actors,
+            "homepage": homepage,
+            "budget": budget,
+            "revenue": revenue,
+            "poster_url": poster_url,
+            "trailer_url": trailer_url
+        }
+
+    # Fallback
+    safe_title = title or "Movie Details"
+    return {
+        "movie_id": m_id or 0,
+        "title": safe_title,
+        "tagline": "",
+        "overview": "Detailed overview for this movie is currently loading.",
+        "release_date": "N/A",
+        "year": "N/A",
+        "runtime_str": "N/A",
+        "rating_str": "★ N/A",
+        "vote_average": 0,
+        "vote_count": 0,
+        "popularity": 0,
+        "genres_list": ["Movie"],
+        "actors": [],
+        "homepage": None,
+        "budget": 0,
+        "revenue": 0,
+        "poster_url": fetch_poster(m_id) if m_id else PLACEHOLDER_IMAGE,
+        "trailer_url": f"https://www.youtube.com/results?search_query={urllib.parse.quote(safe_title + ' trailer')}"
+    }
+
+@st.dialog("🎬 Movie Details", width="large")
+def show_movie_details_dialog(identifier):
+    info = get_movie_full_info(identifier)
+    
+    col_img, col_info = st.columns([1, 2])
+    with col_img:
+        st.image(info["poster_url"], use_container_width=True)
+        
+        # YouTube Trailer Button
+        st.markdown(f"""
+        <a href="{info['trailer_url']}" target="_blank" style="text-decoration: none;">
+            <div style="
+                background: linear-gradient(135deg, #FF0000 0%, #C40000 100%);
+                color: #FFFFFF;
+                font-weight: 700;
+                font-size: 0.95rem;
+                text-align: center;
+                padding: 12px 16px;
+                border-radius: 12px;
+                margin-top: 12px;
+                box-shadow: 0 4px 18px rgba(255, 0, 0, 0.4);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                cursor: pointer;
+            ">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                Watch Trailer on YouTube
+            </div>
+        </a>
+        """, unsafe_allow_html=True)
+        
+        if info["homepage"]:
+            st.markdown(f"""
+            <a href="{info['homepage']}" target="_blank" style="text-decoration: none;">
+                <div style="
+                    background: rgba(255, 255, 255, 0.08);
+                    border: 1px solid rgba(255, 255, 255, 0.15);
+                    color: #E2E8F0;
+                    font-weight: 600;
+                    font-size: 0.88rem;
+                    text-align: center;
+                    padding: 8px 12px;
+                    border-radius: 10px;
+                    margin-top: 8px;
+                ">
+                    🌐 Visit Official Website
+                </div>
+            </a>
+            """, unsafe_allow_html=True)
+
+    with col_info:
+        st.markdown(f"<h2 style='margin-bottom: 2px; font-weight: 800; color: #FFFFFF;'>{info['title']}</h2>", unsafe_allow_html=True)
+        if info["tagline"]:
+            st.markdown(f"<p style='color: #FF9F0A; font-style: italic; margin-bottom: 12px;'>\"{info['tagline']}\"</p>", unsafe_allow_html=True)
+
+        genre_tags = " ".join([f'<span class="movie-genre" style="margin-right: 6px;">{g}</span>' for g in info["genres_list"]])
+        st.markdown(f"""
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+            <span class="badge" style="font-size: 0.95rem; padding: 4px 12px;">{info['rating_str']} ({info['vote_count']:,} votes)</span>
+            <span style="color: #CBD5E1; font-weight: 500;">📅 {info['year']}</span>
+            <span style="color: #CBD5E1; font-weight: 500;">⏱️ {info['runtime_str']}</span>
+        </div>
+        <div style="margin-bottom: 16px;">{genre_tags}</div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("#### 📖 Overview")
+        st.write(info["overview"])
+
+        if info["actors"]:
+            st.markdown("#### 🎭 Top Cast")
+            actors_html = " ".join([f'<span style="background: rgba(255, 159, 10, 0.15); color: #FF9F0A; border: 1px solid rgba(255, 159, 10, 0.3); padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; display: inline-block; margin-right: 6px; margin-bottom: 6px;">{a}</span>' for a in info["actors"]])
+            st.markdown(f"<div>{actors_html}</div>", unsafe_allow_html=True)
+
+        st.markdown("---")
+        col_act1, col_act2 = st.columns(2)
+        with col_act1:
+            is_in_list = is_movie_in_user_list(info)
+            if is_in_list:
+                if st.button("➖ Remove from List", key=f"dlg_rem_{info['movie_id']}", use_container_width=True):
+                    remove_movie_from_user_list(st.session_state.user_email, info["movie_id"], info["title"])
+                    st.toast(f"Removed '{info['title']}' from your list.")
+                    st.rerun()
+            else:
+                if st.button("➕ Add to My List", key=f"dlg_add_{info['movie_id']}", use_container_width=True):
+                    trigger_add_to_list(info)
+        
+        with col_act2:
+            if st.button("✨ Similar Movies", key=f"dlg_rec_{info['movie_id']}", use_container_width=True):
+                st.session_state.selected_movie = info["title"]
+                st.session_state.active_recommendation = ("movie", info["title"])
+                st.session_state.current_page = "Home"
+                st.rerun()
+
+# Custom CSS Styling: Premium Cinematic UI
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 
     html, body, [class*="css"] {
         font-family: 'Outfit', sans-serif;
         -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
     }
 
-    /* Custom Webkit Scrollbar */
     ::-webkit-scrollbar {
         width: 10px;
         background: #09090B;
@@ -376,20 +586,17 @@ st.markdown("""
         background: rgba(255, 159, 10, 0.8);
     }
 
-    /* Base App Styling - Pitch Dark Flixet Theme */
     .stApp {
         background: #09090B !important;
         color: #F8FAFC;
     }
-    /* Prevent screen dimming when rerunning / selecting dropdown option */
+    
     .stApp[data-test-script-state="running"],
     .stApp[data-test-script-state="running"] *,
     [data-test-script-state="running"] [data-testid="stAppViewContainer"],
     [data-test-script-state="running"] [data-testid="stMain"],
     [data-test-script-state="running"] [data-testid="stMainBlockContainer"],
-    [data-test-script-state="running"] .block-container,
-    [data-test-script-state="running"] .element-container,
-    div[data-test-script-state="running"] {
+    [data-test-script-state="running"] .block-container {
         opacity: 1 !important;
         filter: none !important;
         transition: none !important;
@@ -425,49 +632,41 @@ st.markdown("""
     .bg-orb-2 {
         bottom: -10%; right: -10%;
         width: 60vw; height: 60vw;
-        background: radial-gradient(circle, rgba(245, 158, 11, 0.08) 0%, transparent 70%);
+        background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, transparent 70%);
         animation: floatOrb2 30s infinite ease-in-out reverse;
     }
 
-    /* Sidebar Dark Styling */
     section[data-testid="stSidebar"] {
-        background-color: rgba(18, 18, 22, 0.7) !important;
+        background-color: rgba(18, 18, 22, 0.75) !important;
         backdrop-filter: blur(30px);
         -webkit-backdrop-filter: blur(30px);
         border-right: 1px solid rgba(255, 255, 255, 0.08);
         box-shadow: 10px 0 30px rgba(0, 0, 0, 0.8);
     }
 
-    /* Streamlit Content Depth Positioning */
     .block-container {
         position: relative;
         z-index: 1;
-        padding-top: 6rem !important;
+        padding-top: 5.5rem !important;
         padding-bottom: 5rem !important;
     }
 
-    /* Fixed Glass Navbar - Flixet Design */
     .custom-navbar {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
         height: 70px;
-        background: rgba(9, 9, 11, 0.85);
+        background: rgba(9, 9, 11, 0.88);
         backdrop-filter: blur(24px);
         -webkit-backdrop-filter: blur(24px);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         z-index: 99999;
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0 3rem 0 4.5rem;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
-    }
-    .nav-left-group {
-        display: flex;
-        align-items: center;
-        gap: 2.5rem;
     }
     .nav-brand {
         font-size: 1.6rem;
@@ -479,113 +678,35 @@ st.markdown("""
         gap: 10px;
     }
     .brand-sq {
-        width: 32px;
-        height: 32px;
+        width: 34px;
+        height: 34px;
         background: linear-gradient(135deg, #FF9F0A 0%, #F59E0B 100%);
-        border-radius: 9px;
+        border-radius: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
         box-shadow: 0 4px 15px rgba(255, 159, 10, 0.4);
     }
     .brand-sq-inner {
-        width: 12px;
-        height: 12px;
+        width: 14px;
+        height: 14px;
         background: #FFFFFF;
-        border-radius: 3px;
+        border-radius: 4px;
     }
-    .nav-pill-box {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        background: #141416;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        padding: 4px 6px;
-        border-radius: 30px;
-    }
-    .nav-item-link {
-        font-size: 0.9rem;
-        font-weight: 500;
-        color: #94A3B8;
-        padding: 6px 14px;
-        border-radius: 20px;
-        transition: all 0.3s;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-    }
-    .nav-item-link.active {
-        background: rgba(255, 159, 10, 0.15);
-        border: 1px solid #FF9F0A;
-        color: #FF9F0A;
-        font-weight: 700;
-    }
-    .nav-item-link:hover:not(.active) {
-        color: #FFFFFF;
-    }
-    .nav-right-group {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-    }
-    .surprise-pill {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 20px;
+    
+    .nav-user-pill {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 25px;
         padding: 6px 16px;
         color: #FFFFFF;
-        font-size: 0.85rem;
+        font-size: 0.88rem;
         font-weight: 600;
         display: flex;
         align-items: center;
-        gap: 6px;
-        cursor: pointer;
-    }
-    .search-pill-fake {
-        background: #141416;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px;
-        padding: 6px 16px;
-        color: #64748B;
-        font-size: 0.85rem;
-        display: flex;
-        align-items: center;
         gap: 8px;
-        width: 220px;
     }
 
-    /* Section Header Flex Wrapper */
-    .section-header-wrap {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 1.5rem;
-    }
-    .section-icon-badge {
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        border: 1.5px solid rgba(255, 159, 10, 0.5);
-        background: rgba(255, 159, 10, 0.1);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .section-title-main {
-        font-size: 1.6rem;
-        font-weight: 800;
-        color: #FFFFFF;
-        letter-spacing: -0.02em;
-        line-height: 1.2;
-    }
-    .section-subtitle-main {
-        font-size: 0.9rem;
-        color: #8E8E93;
-        font-weight: 400;
-    }
-
-    /* Typography */
     .section-title {
         font-size: 1.8rem;
         font-weight: 800;
@@ -596,13 +717,11 @@ st.markdown("""
     .section-subtitle {
         color: #8E8E93;
         font-size: 1rem;
-        margin-bottom: 2rem;
+        margin-bottom: 1.8rem;
         font-weight: 400;
     }
 
-    /* ===================================================
-       RECOMMENDED MOVIES - NETFLIX / FLIXET RANK STYLING
-    =================================================== */
+    /* NETFLIX STROKE RANK NUMBERS */
     .top10-container {
         position: relative;
         display: flex;
@@ -616,13 +735,12 @@ st.markdown("""
         transform: scale(1.05) translateY(-5px);
     }
 
-    /* Stroke Outline Number */
     .rank-number {
         position: absolute;
         right: calc(50% + 25px);
         bottom: 5px;
         font-size: 5.5rem;
-        font-family: 'Outfit', 'Arial Black', Impact, sans-serif;
+        font-family: 'Outfit', sans-serif;
         font-weight: 900;
         line-height: 0.9;
         color: #09090B;
@@ -639,13 +757,12 @@ st.markdown("""
         transform: scale(1.08) translateX(-5px);
     }
 
-    /* Movie Poster Box */
     .rank-poster-box {
         position: relative;
         width: 180px;
         height: 210px;
         flex-shrink: 0;
-        border-radius: 12px;
+        border-radius: 14px;
         overflow: hidden;
         z-index: 1;
         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -657,18 +774,6 @@ st.markdown("""
         border-color: #FF9F0A;
         box-shadow: 0 20px 40px rgba(0, 0, 0, 0.9), 0 0 30px rgba(255, 159, 10, 0.3);
     }
-    .rank-poster-box::after {
-        content: '';
-        position: absolute;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: linear-gradient(to top, rgba(255, 159, 10, 0.3), transparent 60%);
-        opacity: 0;
-        transition: opacity 0.4s;
-        pointer-events: none;
-    }
-    .top10-container:hover .rank-poster-box::after {
-        opacity: 1;
-    }
     .rank-poster-box img {
         width: 100%;
         height: 100%;
@@ -679,7 +784,6 @@ st.markdown("""
         transform: scale(1.05);
     }
 
-    /* Details Below Poster */
     .rec-card-details {
         display: flex;
         flex-direction: column;
@@ -710,7 +814,7 @@ st.markdown("""
         text-align: center;
     }
 
-    /* Standard Frontpage Glass Cards */
+    /* Standard Cards */
     .poster-card {
         background: #141416;
         border-radius: 16px;
@@ -755,14 +859,6 @@ st.markdown("""
         padding: 4px 10px;
         border-radius: 20px;
     }
-    .movie-actor {
-        font-size: 0.85rem;
-        color: #8E8E93;
-        margin-top: 0.8rem;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-    }
     .badge {
         background: rgba(255, 159, 10, 0.15);
         border: 1px solid rgba(255, 159, 10, 0.3);
@@ -776,27 +872,7 @@ st.markdown("""
         gap: 4px;
     }
 
-    /* Category Buttons (Browse by Genre) */
-    div[data-testid="column"] .stButton > button {
-        background: #141416;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 16px;
-        color: #FFFFFF;
-        font-weight: 700;
-        font-size: 1rem;
-        padding: 1.2rem 1rem;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-    }
-    div[data-testid="column"] .stButton > button:hover {
-        background: #1C1C20;
-        border-color: #FF9F0A;
-        color: #FF9F0A;
-        box-shadow: 0 8px 25px rgba(255, 159, 10, 0.25);
-        transform: translateY(-3px);
-    }
-
-    /* Primary Buttons */
+    /* Buttons Styling */
     .stButton, div[data-testid="stButton"] {
         display: flex !important;
         justify-content: center !important;
@@ -807,19 +883,16 @@ st.markdown("""
         background: linear-gradient(135deg, #FF9F0A 0%, #D97706 100%);
         color: #000000 !important;
         font-weight: 700 !important;
-        font-size: 1rem !important;
+        font-size: 0.95rem !important;
         border: none !important;
         border-radius: 12px !important;
-        padding: 0.7rem 1.6rem !important;
+        padding: 0.65rem 1.4rem !important;
         box-shadow: 0 4px 18px rgba(255, 159, 10, 0.35) !important;
         transition: all 0.3s ease !important;
         width: 100% !important;
-        max-width: 320px !important;
-        margin: 0 auto !important;
         white-space: nowrap !important;
     }
     section[data-testid="stSidebar"] .stButton > button {
-        max-width: 100% !important;
         color: #FFFFFF !important;
         background: #141416 !important;
         border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -828,191 +901,38 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 8px 25px rgba(255, 159, 10, 0.5);
         color: #000000;
-        border: none;
     }
-    .stButton > button:active {
-        transform: translateY(1px);
-    }
-    
-    /* Selectbox styling & dimming removal */
-    div[data-baseweb="select"] {
-        opacity: 1 !important;
-    }
+
     div[data-baseweb="select"] > div {
         background-color: #141416;
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 12px;
         color: white;
-        opacity: 1 !important;
     }
-    div[data-baseweb="popover"],
-    div[data-baseweb="menu"] {
-        opacity: 1 !important;
-        backdrop-filter: none !important;
-        -webkit-backdrop-filter: none !important;
-    }
-    div[data-baseweb="backdrop"] {
-        background: transparent !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-        backdrop-filter: none !important;
-        -webkit-backdrop-filter: none !important;
-    }
-    
-    /* Header & Sidebar Toggle Controls (Ensures toggle button is visible on deployed app) */
+
     #MainMenu { visibility: hidden !important; }
     footer { visibility: hidden !important; }
     div[data-testid="stDecoration"] { display: none !important; }
 
-    header[data-testid="stHeader"], header {
-        visibility: visible !important;
+    header[data-testid="stHeader"] {
         background: transparent !important;
         z-index: 100000 !important;
-        pointer-events: none !important;
     }
 
-    header[data-testid="stHeader"] *, header * {
-        pointer-events: auto !important;
-    }
-
-    /* Style sidebar toggle button (collapsed control & sidebar collapse button) */
     [data-testid="collapsedControl"],
-    [data-testid="stSidebarCollapseButton"],
-    button[data-testid="baseButton-header"],
-    button[data-testid="stSidebarCollapseButton"],
-    button[aria-label="Expand sidebar"],
-    button[aria-label="Collapse sidebar"] {
-        visibility: visible !important;
-        display: flex !important;
+    [data-testid="stSidebarCollapseButton"] {
         z-index: 100001 !important;
         color: #FF9F0A !important;
         background: rgba(20, 20, 25, 0.85) !important;
         border: 1px solid rgba(255, 159, 10, 0.4) !important;
         border-radius: 10px !important;
-        padding: 4px 8px !important;
-        transition: all 0.3s ease !important;
-    }
-
-    [data-testid="collapsedControl"] svg,
-    [data-testid="stSidebarCollapseButton"] svg,
-    button[aria-label="Expand sidebar"] svg,
-    button[aria-label="Collapse sidebar"] svg {
-        fill: #FF9F0A !important;
-        color: #FF9F0A !important;
-        stroke: #FF9F0A !important;
-    }
-
-    [data-testid="collapsedControl"]:hover,
-    [data-testid="stSidebarCollapseButton"]:hover {
-        background: rgba(255, 159, 10, 0.25) !important;
-        border-color: #FF9F0A !important;
-        transform: scale(1.05);
-        box-shadow: 0 0 12px rgba(255, 159, 10, 0.4) !important;
-    }
-
-    /* ===================================================
-       RESPONSIVE MOBILE & TABLET STYLING
-    =================================================== */
-    @media (max-width: 768px) {
-        .custom-navbar {
-            padding: 0 1rem !important;
-            height: 60px !important;
-        }
-        .nav-brand {
-            font-size: 1.25rem !important;
-        }
-        .brand-sq {
-            width: 26px !important;
-            height: 26px !important;
-        }
-        .block-container {
-            padding-top: 4.8rem !important;
-            padding-left: 0.8rem !important;
-            padding-right: 0.8rem !important;
-            padding-bottom: 3rem !important;
-        }
-        .section-title {
-            font-size: 1.35rem !important;
-        }
-        .section-subtitle {
-            font-size: 0.88rem !important;
-            margin-bottom: 1.2rem !important;
-        }
-        .stButton > button {
-            max-width: 100% !important;
-            width: 100% !important;
-            font-size: 0.9rem !important;
-            padding: 0.65rem 1rem !important;
-        }
-        div[data-testid="column"] .stButton > button {
-            padding: 0.75rem 0.5rem !important;
-            font-size: 0.85rem !important;
-            border-radius: 12px !important;
-        }
-        .top10-container {
-            height: 190px !important;
-        }
-        .rank-number {
-            font-size: 3.8rem !important;
-            right: calc(50% + 15px) !important;
-            bottom: 2px !important;
-            -webkit-text-stroke: 1.8px #FF9F0A !important;
-        }
-        .rank-poster-box {
-            width: 130px !important;
-            height: 165px !important;
-            border-radius: 10px !important;
-        }
-        .rec-card-details {
-            width: 130px !important;
-            margin-top: 0.5rem !important;
-        }
-        .rec-card-title {
-            font-size: 0.9rem !important;
-        }
-        .rec-card-meta {
-            font-size: 0.75rem !important;
-        }
-        .poster-card {
-            padding: 0.75rem !important;
-            border-radius: 12px !important;
-        }
-        .movie-title {
-            font-size: 0.95rem !important;
-        }
-        .movie-genre, .badge {
-            font-size: 0.75rem !important;
-            padding: 3px 8px !important;
-        }
-    }
-
-    @media (max-width: 480px) {
-        .custom-navbar {
-            padding: 0 0.8rem !important;
-        }
-        .section-title {
-            font-size: 1.2rem !important;
-        }
-        .rank-number {
-            font-size: 3.2rem !important;
-            right: calc(50% + 10px) !important;
-        }
-        .rank-poster-box, .rec-card-details {
-            width: 115px !important;
-        }
-        .rank-poster-box {
-            height: 145px !important;
-        }
-        div[data-testid="column"] {
-            min-width: 100% !important;
-        }
     }
 </style>
 <div class="bg-orb-1"></div>
 <div class="bg-orb-2"></div>
 """, unsafe_allow_html=True)
 
-# 3. Session State Initialization
+# Session State Initialization
 if "selected_movie" not in st.session_state:
     st.session_state.selected_movie = None
 if "current_page" not in st.session_state:
@@ -1027,6 +947,8 @@ if "user_email" not in st.session_state:
     st.session_state.user_email = ""
 if "pending_movie" not in st.session_state:
     st.session_state.pending_movie = None
+if "guest_watchlist" not in st.session_state:
+    st.session_state.guest_watchlist = []
 
 RANDOM_FEATURED_MOVIES = [
     {
@@ -1106,7 +1028,7 @@ FILTER_OPTIONS = [
     ("☆", "Top Rated")
 ]
 
-# 4. Sidebar Filters & Navigation
+# Sidebar Navigation & Controls
 with st.sidebar:
     st.markdown("## 🧭 Navigation")
     if st.button("🏠 Home", use_container_width=True):
@@ -1115,10 +1037,13 @@ with st.sidebar:
         st.session_state.active_recommendation = None
         st.rerun()
 
-    # Count movies from MongoDB for logged-in user
-    user_movies_count = len(get_user_movies_from_db(st.session_state.user_email)) if st.session_state.get("logged_in") else 0
-    if st.button(f"📌 My List ({user_movies_count})", use_container_width=True):
-        st.session_state.current_page = "My List"
+    user_movies_count = len(get_user_movies_from_db(st.session_state.user_email))
+    if st.button(f"👤 My Profile & List ({user_movies_count})", use_container_width=True):
+        st.session_state.current_page = "Profile"
+        st.rerun()
+
+    if st.button(f"📌 Watchlist ({user_movies_count})", use_container_width=True):
+        st.session_state.current_page = "Watchlist"
         st.rerun()
 
     st.markdown("---")
@@ -1132,7 +1057,7 @@ with st.sidebar:
             st.toast("Logged out successfully.")
             st.rerun()
     else:
-        st.info("Log in to save movies to your personal list.")
+        st.info("Log in to sync your watchlist to the cloud.")
         if st.button("🔑 Log In / Register", use_container_width=True):
             show_auth_dialog()
 
@@ -1143,14 +1068,6 @@ with st.sidebar:
         st.session_state.selected_movie = None
         st.session_state.active_recommendation = None
         st.rerun()
-
-def filter_movies(movie_list):
-    selected_filter = st.session_state.selected_filter
-    if selected_filter == "All":
-        return movie_list
-    if selected_filter == "Top Rated":
-        return [m for m in movie_list if float(m["rating"].replace("★", "").strip()) >= 8]
-    return [m for m in movie_list if selected_filter.lower() in m["genre"].lower()]
 
 def get_filtered_movies(limit):
     selected_filter = st.session_state.selected_filter
@@ -1170,16 +1087,16 @@ def get_filtered_movies(limit):
         filtered_data = df[
             df["genres_list"].apply(
                 lambda genres: dataset_genre.replace("-", " ").lower()
-                in {genre.replace("-", " ").lower() for genre in genres}
+                in {genre.replace("-", " ").lower() for genre in genres} if isinstance(genres, list) else False
             )
         ].sort_values(by="popularity", ascending=False).head(limit)
 
     return [
         {
             "title": row["title"],
-            "genre": row["genres_list"][0] if row["genres_list"] else "Unknown",
-            "actor": row["actors"][0] if row["actors"] else "Unknown",
-            "rating": f"★ {row['vote_average']:.1f}",
+            "genre": row["genres_list"][0] if ('genres_list' in row and isinstance(row['genres_list'], list) and row["genres_list"]) else "Unknown",
+            "actor": row["actors"][0] if ('actors' in row and isinstance(row['actors'], list) and row["actors"]) else "Unknown",
+            "rating": f"★ {row['vote_average']:.1f}" if pd.notnull(row.get('vote_average')) else "★ N/A",
             "img": fetch_poster(row["id"]),
             "movie_id": row["id"]
         }
@@ -1217,65 +1134,207 @@ def get_recommendations(target_title, n=5):
         })
     return recommendations
 
-# 5. Header Bar (Fixed Navbar)
-st.markdown("""
+# Top Navbar Rendering
+user_disp = st.session_state.user_email if st.session_state.get("logged_in") else "Guest Profile"
+st.markdown(f"""
 <div class="custom-navbar">
     <div class="nav-brand">
+        <div class="brand-sq"><div class="brand-sq-inner"></div></div>
         MoviX
+    </div>
+    <div class="nav-user-pill">
+        👤 {user_disp}
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-# 6. Main Content View
-if st.session_state.current_page == "My List":
-    st.markdown('<div class="section-title">📌 My Watchlist</div>', unsafe_allow_html=True)
-    if not st.session_state.get("logged_in"):
-        st.warning("🔒 Only logged-in users can access their personal movie list. Please log in or register.")
-        if st.button("🔑 Log In / Register Now", use_container_width=True):
-            show_auth_dialog()
-    else:
-        db_movies = get_user_movies_from_db(st.session_state.user_email)
+# MAIN CONTENT ROUTING
+
+# PAGE 1: PROFILE PAGE
+if st.session_state.current_page == "Profile":
+    user_email = st.session_state.get("user_email", "")
+    is_logged = st.session_state.get("logged_in", False)
+    display_email = user_email if is_logged else "Guest Cinephile"
+    avatar_char = user_email[0].upper() if is_logged and user_email else "👤"
+
+    db_movies = get_user_movies_from_db(user_email)
+    total_movies_count = len(db_movies)
+
+    # Calculate Watchlist Stats
+    watchlist_full_info = [get_movie_full_info(m) for m in db_movies]
+    valid_ratings = [m["vote_average"] for m in watchlist_full_info if m["vote_average"] > 0]
+    avg_rating_val = sum(valid_ratings) / len(valid_ratings) if valid_ratings else 0.0
+    avg_rating_str = f"★ {avg_rating_val:.1f}" if avg_rating_val > 0 else "★ N/A"
+
+    # Calculate Top Genre
+    all_saved_genres = [g for m in watchlist_full_info for g in m["genres_list"] if g != "Movie"]
+    top_genre_str = max(set(all_saved_genres), key=all_saved_genres.count) if all_saved_genres else "Cinematic"
+
+    # Profile Hero Banner
+    st.markdown(f"""
+    <div style="
+        background: linear-gradient(135deg, rgba(24, 24, 32, 0.95) 0%, rgba(12, 12, 18, 0.98) 100%);
+        border: 1px solid rgba(255, 159, 10, 0.3);
+        border-radius: 20px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+    ">
+        <div style="display: flex; align-items: center; gap: 1.5rem;">
+            <div style="
+                width: 75px; height: 75px;
+                border-radius: 50%;
+                background: linear-gradient(135deg, #FF9F0A 0%, #D97706 100%);
+                display: flex; align-items: center; justify-content: center;
+                font-size: 2rem; font-weight: 800; color: #000000;
+                box-shadow: 0 0 25px rgba(255, 159, 10, 0.4);
+            ">
+                {avatar_char}
+            </div>
+            <div>
+                <h2 style="margin: 0; font-weight: 800; color: #FFFFFF; font-size: 1.8rem;">{display_email}</h2>
+                <p style="margin: 4px 0 0 0; color: #94A3B8; font-size: 0.95rem;">Personal Cinephile Profile & Collection</p>
+                <div style="display: flex; gap: 8px; margin-top: 8px;">
+                    <span class="badge" style="background: rgba(255, 159, 10, 0.15); border-color: rgba(255, 159, 10, 0.4);">👑 Cinephile Member</span>
+                    <span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818CF8; border-color: rgba(99, 102, 241, 0.4);">🎬 Active Curator</span>
+                </div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 1.2rem; align-items: center; flex-wrap: wrap;">
+            <div style="text-align: center; background: rgba(255, 255, 255, 0.04); padding: 12px 20px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.06);">
+                <div style="font-size: 1.6rem; font-weight: 800; color: #FF9F0A;">{total_movies_count}</div>
+                <div style="font-size: 0.78rem; color: #94A3B8; font-weight: 600;">SAVED MOVIES</div>
+            </div>
+            <div style="text-align: center; background: rgba(255, 255, 255, 0.04); padding: 12px 20px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.06);">
+                <div style="font-size: 1.6rem; font-weight: 800; color: #10B981;">{avg_rating_str}</div>
+                <div style="font-size: 0.78rem; color: #94A3B8; font-weight: 600;">AVG RATING</div>
+            </div>
+            <div style="text-align: center; background: rgba(255, 255, 255, 0.04); padding: 12px 20px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.06);">
+                <div style="font-size: 1.6rem; font-weight: 800; color: #818CF8;">{top_genre_str}</div>
+                <div style="font-size: 0.78rem; color: #94A3B8; font-weight: 600;">TOP GENRE</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    tab_wl, tab_analytics, tab_acc = st.tabs(["🍿 My Watchlist", "📊 Cinephile Analytics", "⚙️ Account Settings"])
+
+    with tab_wl:
         if not db_movies:
-            st.info("Your list is currently empty. Go add some movies from the Home page!")
+            st.info("🍿 Your watchlist is currently empty. Explore movies on the home page and click '➕ Add to List' to start your collection!")
+            if st.button("🎬 Browse & Discover Movies", use_container_width=True):
+                st.session_state.current_page = "Home"
+                st.rerun()
         else:
+            search_query = st.text_input("🔍 Search within Watchlist", placeholder="Filter saved movies by title...", key="wl_search_kw")
+            filtered_wl = [m for m in watchlist_full_info if search_query.lower() in m["title"].lower()] if search_query else watchlist_full_info
+
             cols = st.columns(4)
-            for idx, movie in enumerate(db_movies):
-                m_id = movie.get("movie_id")
-                m_title = movie.get("title", "Movie")
-
-                df_match = df[df['title'] == m_title] if 'df' in globals() and df is not None else pd.DataFrame()
-                if df_match.empty and m_id:
-                    df_match = df[df['id'] == m_id] if 'df' in globals() and df is not None else pd.DataFrame()
-
-                if not df_match.empty:
-                    row = df_match.iloc[0]
-                    genre_str = row['genres_list'][0] if ('genres_list' in row and isinstance(row['genres_list'], list) and len(row['genres_list']) > 0) else "Movie"
-                    rating_str = f"★ {row['vote_average']:.1f}" if ('vote_average' in row and pd.notnull(row['vote_average'])) else "★ N/A"
-                    img_url = fetch_poster(row.get('id', m_id))
-                else:
-                    genre_str = "Movie"
-                    rating_str = "★ N/A"
-                    img_url = fetch_poster(m_id) if m_id else PLACEHOLDER_IMAGE
-
+            for idx, movie in enumerate(filtered_wl):
                 col = cols[idx % 4]
                 with col:
                     st.markdown(f"""
                     <div class="poster-card">
-                        <img src="{img_url}" style="width: 100%; border-radius: 12px; aspect-ratio: 2/3; object-fit: cover; margin-bottom: 0.5rem;" alt="{m_title}">
-                        <div class="movie-title">{m_title}</div>
+                        <img src="{movie['poster_url']}" style="width: 100%; border-radius: 12px; aspect-ratio: 2/3; object-fit: cover; margin-bottom: 0.5rem;" alt="{movie['title']}">
+                        <div class="movie-title">{movie['title']}</div>
                         <div class="movie-meta">
-                            <span class="movie-genre">{genre_str}</span>
-                            <span class="badge">{rating_str}</span>
+                            <span class="movie-genre">{movie['genres_list'][0]}</span>
+                            <span class="badge">{movie['rating_str']}</span>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    if st.button("➖ Remove", key=f"remove_db_{idx}", use_container_width=True):
-                        remove_movie_from_user_list(st.session_state.user_email, m_id, m_title)
-                        st.toast(f"Removed '{m_title}' from your list.")
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("ℹ️ Details", key=f"prof_det_{idx}_{movie['movie_id']}", use_container_width=True):
+                            show_movie_details_dialog(movie)
+                    with c2:
+                        if st.button("➖ Remove", key=f"prof_rem_{idx}_{movie['movie_id']}", use_container_width=True):
+                            remove_movie_from_user_list(user_email, movie['movie_id'], movie['title'])
+                            st.toast(f"Removed '{movie['title']}' from watchlist.")
+                            st.rerun()
+
+    with tab_analytics:
+        st.markdown("### 📊 Watchlist Insights")
+        if not db_movies:
+            st.info("Add movies to your watchlist to unlock genre and cinephile analytics.")
+        else:
+            col_a1, col_a2 = st.columns(2)
+            with col_a1:
+                st.markdown("#### 🏷️ Genre Breakdown")
+                genre_counts = pd.Series(all_saved_genres).value_counts()
+                for genre_name, count in genre_counts.items():
+                    pct = int((count / len(all_saved_genres)) * 100)
+                    st.write(f"**{genre_name}** ({count} movies)")
+                    st.progress(pct / 100.0)
+            
+            with col_a2:
+                st.markdown("#### 🎭 Top Cast in Your Watchlist")
+                all_actors = [a for m in watchlist_full_info for a in m["actors"]]
+                if all_actors:
+                    actor_counts = pd.Series(all_actors).value_counts().head(5)
+                    for actor_name, a_count in actor_counts.items():
+                        st.markdown(f"- **{actor_name}** ({a_count} appearances)")
+                else:
+                    st.write("Cast data sync complete.")
+
+    with tab_acc:
+        st.markdown("### 🔐 Account & Cloud Sync")
+        if is_logged:
+            st.success(f"Connected to Cloud Account: **{user_email}**")
+            if st.button("🚪 Log Out", key="prof_logout_btn", use_container_width=True):
+                st.session_state.logged_in = False
+                st.session_state.user_email = ""
+                st.rerun()
+        else:
+            st.info("You are currently using Guest Mode. Log in or create an account to sync your watchlist across devices.")
+            if st.button("🔑 Log In / Register Account", key="prof_login_btn", use_container_width=True):
+                show_auth_dialog()
+
+# PAGE 2: WATCHLIST DIRECT PAGE
+elif st.session_state.current_page == "Watchlist":
+    st.markdown('<div class="section-title">📌 My Watchlist</div>', unsafe_allow_html=True)
+    db_movies = get_user_movies_from_db(st.session_state.get("user_email", ""))
+    
+    if not db_movies:
+        st.info("Your list is currently empty. Go add some movies from the Home page!")
+        if st.button("🎬 Browse Movies Now", use_container_width=True):
+            st.session_state.current_page = "Home"
+            st.rerun()
+    else:
+        cols = st.columns(4)
+        for idx, movie in enumerate(db_movies):
+            info = get_movie_full_info(movie)
+            col = cols[idx % 4]
+            with col:
+                st.markdown(f"""
+                <div class="poster-card">
+                    <img src="{info['poster_url']}" style="width: 100%; border-radius: 12px; aspect-ratio: 2/3; object-fit: cover; margin-bottom: 0.5rem;" alt="{info['title']}">
+                    <div class="movie-title">{info['title']}</div>
+                    <div class="movie-meta">
+                        <span class="movie-genre">{info['genres_list'][0]}</span>
+                        <span class="badge">{info['rating_str']}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("ℹ️ Details", key=f"wl_det_{idx}_{info['movie_id']}", use_container_width=True):
+                        show_movie_details_dialog(info)
+                with c2:
+                    if st.button("➖ Remove", key=f"wl_rem_{idx}_{info['movie_id']}", use_container_width=True):
+                        remove_movie_from_user_list(st.session_state.get("user_email", ""), info['movie_id'], info['title'])
+                        st.toast(f"Removed '{info['title']}' from your list.")
                         st.rerun()
 
+# PAGE 3: HOME & RECOMMENDATIONS
 elif st.session_state.selected_movie is None:
-    # --- FRONTPAGE VIEW ---
     st.markdown('<div class="section-title">🔍 Discover Your Next Watch</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-subtitle">Search for a title or pick from the list below to get instant personalized recommendations.</div>', unsafe_allow_html=True)
 
@@ -1286,7 +1345,7 @@ elif st.session_state.selected_movie is None:
         label_visibility="collapsed"
     )
 
-    n = st.slider("NO. Of Recommendation", min_value=3, max_value=10)
+    n = st.slider("NO. Of Recommendation", min_value=3, max_value=10, value=5)
     
     col_rec1, col_rec2, col_rec3 = st.columns([1, 1.5, 1])
     with col_rec2:
@@ -1330,10 +1389,16 @@ elif st.session_state.selected_movie is None:
                         <div class="rec-card-meta">{movie['genre']} • {movie['rating']}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                    is_in_list = is_movie_in_user_list(movie)
-                    btn_text = "✔ In List" if is_in_list else "➕ Add to List"
-                    if st.button(btn_text, key=f"rec_search_add_{index}", use_container_width=True):
-                        trigger_add_to_list(movie)
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("ℹ️ Details", key=f"rec_search_det_{index}", use_container_width=True):
+                            show_movie_details_dialog(movie)
+                    with c2:
+                        is_in_list = is_movie_in_user_list(movie)
+                        btn_text = "✔ In List" if is_in_list else "➕ Add"
+                        if st.button(btn_text, key=f"rec_search_add_{index}", use_container_width=True):
+                            trigger_add_to_list(movie)
         else:
             st.info("No recommendations found for this movie.")
 
@@ -1357,15 +1422,21 @@ elif st.session_state.selected_movie is None:
                         <div class="rec-card-meta">{movie['genre']} • {movie['rating']}</div>
                     </div>
                     """, unsafe_allow_html=True)
-                    is_in_list = is_movie_in_user_list(movie)
-                    btn_text = "✔ In List" if is_in_list else "➕ Add to List"
-                    if st.button(btn_text, key=f"rec_genre_add_{index}", use_container_width=True):
-                        trigger_add_to_list(movie)
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("ℹ️ Details", key=f"rec_genre_det_{index}", use_container_width=True):
+                            show_movie_details_dialog(movie)
+                    with c2:
+                        is_in_list = is_movie_in_user_list(movie)
+                        btn_text = "✔ In List" if is_in_list else "➕ Add"
+                        if st.button(btn_text, key=f"rec_genre_add_{index}", use_container_width=True):
+                            trigger_add_to_list(movie)
         else:
             st.info(f"No recommendations found for genre '{target_genre}'.")
 
     else:
-        # Initial Display: Show Popular Movies & Shows
+        # Initial Display: Popular Movies & Shows
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<div class="section-title">🍿 Popular Movies & Shows</div>', unsafe_allow_html=True)
 
@@ -1384,27 +1455,23 @@ elif st.session_state.selected_movie is None:
                             <span class="movie-genre">{movie['genre']}</span>
                             <span class="badge">{movie['rating']}</span>
                         </div>
-                        <div class="movie-actor">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                            {movie['actor']}
-                        </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    col1, col2 = st.columns([4, 1])
-                    with col1:
-                        if st.button("Recommend", key=f"grid_btn_{idx}", use_container_width=True):
-                            st.session_state.selected_movie = movie["title"]
-                            st.rerun()
-                    with col2:
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("ℹ️ Details", key=f"pop_det_{idx}", use_container_width=True):
+                            show_movie_details_dialog(movie)
+                    with c2:
                         is_in_list = is_movie_in_user_list(movie)
-                        btn_icon = "✔" if is_in_list else "➕"
-                        if st.button(btn_icon, key=f"add_list_{idx}", use_container_width=True, help="Add to My List"):
+                        btn_text = "✔ List" if is_in_list else "➕ Add"
+                        if st.button(btn_text, key=f"pop_add_{idx}", use_container_width=True):
                             trigger_add_to_list(movie)
         else:
             st.info("No movies match your current sidebar filters. Try resetting the filters.")
 
 else:
-    # --- RECOMMENDATIONS VIEW (NETFLIX STROKE RANK NUMBERS) ---
+    # RECOMMENDATIONS VIEW FOR SPECIFIC TARGET MOVIE
     target = st.session_state.selected_movie
 
     if st.button("← Back to Frontpage"):
@@ -1413,8 +1480,8 @@ else:
 
     st.markdown(f"""
     <div style="margin-top: 1.5rem; margin-bottom: 2rem;">
-        <h2 style="font-size: 2.5rem; font-weight: 800; color: #FFFFFF; letter-spacing: -0.02em;">Top Recommendations for: <span style="background: linear-gradient(135deg, #A5B4FC 0%, #E0E7FF 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">{target}</span></h2>
-        <p style="color: #94A3B8; font-size: 1.1rem;">Ranked picks based on your selected title.</p>
+        <h2 style="font-size: 2.2rem; font-weight: 800; color: #FFFFFF;">Top Recommendations for: <span style="color: #FF9F0A;">{target}</span></h2>
+        <p style="color: #94A3B8; font-size: 1rem;">Ranked picks based on content similarity algorithm.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1429,7 +1496,6 @@ else:
                     <div class="rank-number">{movie['rank']}</div>
                     <div class="rank-poster-box">
                         <img src="{movie['img']}" alt="{movie['title']}">
-                        <div class="recently-added-badge">Recently added</div>
                     </div>
                 </div>
                 <div class="rec-card-details">
@@ -1437,9 +1503,15 @@ else:
                     <div class="rec-card-meta">{movie['genre']} • {movie['rating']}</div>
                 </div>
                 """, unsafe_allow_html=True)
-                is_in_list = is_movie_in_user_list(movie)
-                btn_text = "✔ In List" if is_in_list else "➕ Add to List"
-                if st.button(btn_text, key=f"rec_add_list_{idx}", use_container_width=True):
-                    trigger_add_to_list(movie)
+                
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("ℹ️ Details", key=f"target_rec_det_{idx}", use_container_width=True):
+                        show_movie_details_dialog(movie)
+                with c2:
+                    is_in_list = is_movie_in_user_list(movie)
+                    btn_text = "✔ In List" if is_in_list else "➕ Add"
+                    if st.button(btn_text, key=f"target_rec_add_{idx}", use_container_width=True):
+                        trigger_add_to_list(movie)
     else:
         st.info("No recommendations found for this movie.")
