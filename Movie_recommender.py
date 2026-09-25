@@ -665,7 +665,7 @@ st.markdown("""
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 3rem 0 4.5rem;
+        padding: 0 180px 0 4.5rem;
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
     }
     .nav-brand {
@@ -1135,16 +1135,17 @@ def get_recommendations(target_title, n=5):
     return recommendations
 
 # Top Navbar Rendering
-user_disp = st.session_state.user_email if st.session_state.get("logged_in") else "Guest Profile"
+user_pill_html = ""
+if st.session_state.get("logged_in") and st.session_state.get("user_email"):
+    user_pill_html = f'<div class="nav-user-pill">👤 {st.session_state.user_email}</div>'
+
 st.markdown(f"""
 <div class="custom-navbar">
     <div class="nav-brand">
         <div class="brand-sq"><div class="brand-sq-inner"></div></div>
         MoviX
     </div>
-    <div class="nav-user-pill">
-        👤 {user_disp}
-    </div>
+    {user_pill_html}
 </div>
 """, unsafe_allow_html=True)
 
